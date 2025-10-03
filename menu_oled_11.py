@@ -71,6 +71,7 @@ menu_options = [
     "Foto B/N",
     "Foto Color",
     "Filtros",
+    "Temporizador",
     "Borrar Fotos",
     "Enviar a Android",
     "Bluetooth",
@@ -87,15 +88,27 @@ submenu_filtros_options = [
     "Verde"
 ]
 
+submenu_timer_options = [
+    "Desactivado",
+    "3 segundos",
+    "5 segundos",
+    "10 segundos"
+]
+
 # ---------------------------
 # Variables de estado
 # ---------------------------
 current_index = 0
 scroll_offset = 0
 submenu_active = False
+submenu_type = None  # 'filtros' o 'timer'
 filtro_index = 0
 filtro_scroll = 0
 filtro_seleccionado = "Normal"
+timer_index = 0
+timer_scroll = 0
+timer_seleccionado = "Desactivado"
+timer_segundos = 0
 running = True
 bluetooth_active = True
 
@@ -174,9 +187,17 @@ def draw_menu(selected_index, offset, items, title="Menu"):
     draw = ImageDraw.Draw(image)
     draw.text((2, 0), title, font=font, fill="white")
 
+    # Iconos en esquina superior derecha
+    icon_x = device.width - 12
+    
     # Icono de Bluetooth
-    icon_color = "white" if bluetooth_active else "black"
-    draw.rectangle((device.width-20, 0, device.width-15, 5), fill=icon_color)
+    if bluetooth_active:
+        draw.text((icon_x - 2, 0), "B", font=font, fill="white")
+    
+    # Icono de Timer (si está activado)
+    if timer_segundos > 0 and not submenu_active:
+        timer_icon = f"T{timer_segundos}"
+        draw.text((icon_x - 18, 0), timer_icon, font=font, fill="white")
 
     max_visible = 3
     start_idx = offset
@@ -203,7 +224,10 @@ def draw_menu(selected_index, offset, items, title="Menu"):
 def update_display():
     """Actualiza el display según el menú activo."""
     if submenu_active:
-        draw_menu(filtro_index, filtro_scroll, submenu_filtros_options, title="Filtros")
+        if submenu_type == 'filtros':
+            draw_menu(filtro_index, filtro_scroll, submenu_filtros_options, title="Filtros")
+        elif submenu_type == 'timer':
+            draw_menu(timer_index, timer_scroll, submenu_timer_options, title="Temporizador")
     else:
         draw_menu(current_index, scroll_offset, menu_options, title="Menu")
 
@@ -213,13 +237,18 @@ def update_display():
 
 def scroll_up():
     """Navega hacia arriba en el menú."""
-    global current_index, scroll_offset, filtro_index, filtro_scroll
+    global current_index, scroll_offset, filtro_index, filtro_scroll, timer_index, timer_scroll
     max_visible = 3
     
     if submenu_active:
-        filtro_index = (filtro_index - 1) % len(submenu_filtros_options)
-        if filtro_index < filtro_scroll:
-            filtro_scroll = filtro_index
+        if submenu_type == 'filtros':
+            filtro_index = (filtro_index - 1) % len(submenu_filtros_options)
+            if filtro_index < filtro_scroll:
+                filtro_scroll = filtro_index
+        elif submenu_type == 'timer':
+            timer_index = (timer_index - 1) % len(submenu_timer_options)
+            if timer_index < timer_scroll:
+                timer_scroll = timer_index
     else:
         current_index = max(0, current_index - 1)
         if current_index < scroll_offset:
@@ -228,13 +257,18 @@ def scroll_up():
 
 def scroll_down():
     """Navega hacia abajo en el menú."""
-    global current_index, scroll_offset, filtro_index, filtro_scroll
+    global current_index, scroll_offset, filtro_index, filtro_scroll, timer_index, timer_scroll
     max_visible = 3
     
     if submenu_active:
-        filtro_index = (filtro_index + 1) % len(submenu_filtros_options)
-        if filtro_index >= filtro_scroll + max_visible:
-            filtro_scroll = filtro_index - max_visible + 1
+        if submenu_type == 'filtros':
+            filtro_index = (filtro_index + 1) % len(submenu_filtros_options)
+            if filtro_index >= filtro_scroll + max_visible:
+                filtro_scroll = filtro_index - max_visible + 1
+        elif submenu_type == 'timer':
+            timer_index = (timer_index + 1) % len(submenu_timer_options)
+            if timer_index >= timer_scroll + max_visible:
+                timer_scroll = timer_index - max_visible + 1
     else:
         current_index = min(len(menu_options) - 1, current_index + 1)
         if current_index >= scroll_offset + max_visible:
@@ -269,15 +303,15 @@ def delete_photos():
         for file in files:
             os.remove(os.path.join(PHOTO_DIR, file))
         
-        show_message(f"✅ {count} fotos borradas", duration=2)
+        show_message(f"{count} fotos borradas", duration=2)
         
     except Exception as e:
-        show_message("❌ Error borrando", duration=2)
+        show_message("Error borrando", duration=2)
     
     update_display()
 
 # ---------------------------
-# Enviar foto individual por BT (menú) - VERSIÓN QUE FUNCIONA
+# Enviar foto individual por BT (menú)
 # ---------------------------
 def send_single_photo_menu():
     fotos = [f for f in os.listdir(PHOTO_DIR) if f.lower().endswith(('.jpg', '.dng'))]
@@ -313,71 +347,63 @@ def send_single_photo_menu():
             time.sleep(0.15)
         elif pi.read(BTN_ENTER) == 0:
             ruta_completa = os.path.join(PHOTO_DIR, fotos[index])
-            show_message("📤 Enviando...", 0.8)
+            show_message("Enviando...", 0.8)
             try:
                 comando = [
                     "obexftp", "--nopath", "--noconn", "--uuid", "none",
                     "-b", MAC_ANDROID, "-B", CANAL_OBEX, "-p", ruta_completa
                 ]
-                # Si es una imagen sin filtro (posible gran tamaño), damos más tiempo
-                timeout = 240  if not any(t in nombre.upper() for t in ["GLITCH", "GRAIN", "ROJO", "SEP", "AZUL"]) else 90
+                timeout = 240 if not any(t in nombre.upper() for t in ["GLITCH", "GRAIN", "ROJO", "SEP", "AZUL"]) else 90
                 proceso = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 salida, error = proceso.communicate(timeout=timeout)
                 if proceso.returncode == 0:
-                    show_message(f"✅ {fotos[index][:10]}...", 2)
+                    show_message(f"{fotos[index][:10]}...", 2)
                 else:
                     print("obex error:", error.decode(errors="ignore"))
-                    show_message("❌ Error envío", 2)
+                    show_message("Error envio", 2)
             except subprocess.TimeoutExpired:
                 proceso.kill()
-                show_message("⌛ Timeout", 2)
+                show_message("Timeout", 2)
             break
         elif pi.read(BTN_TAKE) == 0:
             show_message("Cancelado", 0.8)
             break
 
 # ---------------------------
-# Captura de fotos con feedback visual CORREGIDA
+# Captura de fotos con feedback visual
 # ---------------------------
 
 def check_disk_space_safe():
     """Verifica espacio en disco de forma segura."""
     try:
-        # Intentar llamar a la función en filtros.py sin parámetros
         return filtros.check_disk_space()
     except TypeError:
-        # Si falla, usar implementación simple
         try:
             stat = os.statvfs(PHOTO_DIR)
             free_mb = (stat.f_bavail * stat.f_frsize) / (1024 * 1024)
-            return free_mb > 100  # 100MB mínimo
+            return free_mb > 100
         except:
-            return True  # Si no podemos verificar, asumir que hay espacio
+            return True
 
 def take_photo(mode):
     """
     Captura foto y aplica filtro seleccionado.
     Mantiene la imagen original Y la filtrada.
     """
-    # Verificar espacio en disco (forma segura)
     if not check_disk_space_safe():
-        show_message("⚠️ Poco espacio", duration=2)
+        show_message("Poco espacio", duration=2)
         return None
     
-    # Matar procesos previos
     subprocess.run(["pkill", "-f", "rpicam-still"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     try:
-        # Generar nombre de archivo base
         timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
         base_file = os.path.join(PHOTO_DIR, f"foto_{timestamp}.jpg")
 
-        # PASO 1: Preparar captura
-        show_progress("📷 Preparando...")
-        time.sleep(0.3)  # Dar tiempo para que el usuario vea el mensaje
+        show_progress("Preparando...")
+        time.sleep(0.3)
         
-        # PASO 2: Capturar imagen
-        show_progress("📷 Capturando...")
+        show_progress("Capturando...")
         
         if mode == "Foto B/N":
             cmd = ["rpicam-still", "-o", base_file, "--nopreview", "--saturation", "-100", "--timeout", "5000"]
@@ -389,29 +415,25 @@ def take_photo(mode):
         result = subprocess.run(cmd, timeout=15, capture_output=True, text=True)
         
         if result.returncode != 0:
-            show_message("❌ Error camara", duration=2)
-            # Limpiar archivo si falló
+            show_message("Error camara", duration=2)
             if os.path.exists(base_file):
                 os.remove(base_file)
             return None
 
-        # PASO 3: Foto capturada exitosamente
-        show_progress("✅ Foto capturada!", "Procesando...")
+        show_progress("Foto capturada!", "Procesando...")
         time.sleep(0.5)
 
-        # PASO 4: Aplicar filtro si es necesario
         final_file = base_file
         
         if filtro_seleccionado != "Normal":
-            # Aplicar filtro manteniendo el original
-            show_progress("⚙️ Aplicando filtro...", filtro_seleccionado[:15])
+            show_progress("Aplicando filtro...", filtro_seleccionado[:15])
             
             if filtro_seleccionado == "Grano Analogico":
                 final_file = base_file.replace(".jpg", "_grano.jpg")
                 try:
                     filtros.filtro_grano_analogico(base_file, final_file, intensidad=20)
                 except:
-                    final_file = base_file  # Fallback al original
+                    final_file = base_file
                 
             elif filtro_seleccionado == "Glitch Digital":
                 final_file = base_file.replace(".jpg", "_glitch.jpg")
@@ -448,33 +470,21 @@ def take_photo(mode):
                 except:
                     final_file = base_file
 
-            elif filtro_seleccionado == "Matrix Verde":
-                final_file = base_file.replace(".jpg", "_matrix.jpg")
-                try:
-                    filtros.filtro_matrix_verde(base_file, final_file)
-                except:
-                    final_file = base_file
-
-        
-        # PASO 5: Limpiar memoria
         try:
             filtros.cleanup_memory()
         except:
             pass
         
-        # PASO 6: Mensaje final
-        show_message("✅ Listo!", duration=1.5)
+        show_message("Listo!", duration=1.5)
         return os.path.basename(final_file)
 
     except subprocess.TimeoutExpired:
-        show_message("⌛ Timeout camara", duration=2)
-        # Limpiar archivo si falló
+        show_message("Timeout camara", duration=2)
         if os.path.exists(base_file):
             os.remove(base_file)
         return None
     except Exception as e:
-        show_message(f"❌ Error", duration=2)
-        # Limpiar archivo si falló
+        show_message("Error", duration=2)
         if os.path.exists(base_file):
             os.remove(base_file)
         return None
@@ -485,23 +495,40 @@ def take_photo(mode):
 
 def confirm_selection():
     """Confirma la selección del menú actual."""
-    global submenu_active, filtro_seleccionado, running
+    global submenu_active, submenu_type, filtro_seleccionado, timer_seleccionado, timer_segundos, running
     
     if submenu_active:
-        # Estamos en submenú de filtros
-        filtro_seleccionado = submenu_filtros_options[filtro_index]
-        show_message(f"Filtro: {filtro_seleccionado}", 1.5)
-        submenu_active = False
-        
+        if submenu_type == 'filtros':
+            filtro_seleccionado = submenu_filtros_options[filtro_index]
+            show_message(f"Filtro: {filtro_seleccionado}", 1.5)
+            submenu_active = False
+            submenu_type = None
+        elif submenu_type == 'timer':
+            timer_seleccionado = submenu_timer_options[timer_index]
+            if timer_seleccionado == "Desactivado":
+                timer_segundos = 0
+            elif "3 segundos" in timer_seleccionado:
+                timer_segundos = 3
+            elif "5 segundos" in timer_seleccionado:
+                timer_segundos = 5
+            elif "10 segundos" in timer_seleccionado:
+                timer_segundos = 10
+            show_message(f"Timer: {timer_seleccionado}", 1.5)
+            submenu_active = False
+            submenu_type = None
     else:
-        # Estamos en menú principal
         option = menu_options[current_index]
         
         if option == "Filtros":
             submenu_active = True
+            submenu_type = 'filtros'
+            
+        elif option == "Temporizador":
+            submenu_active = True
+            submenu_type = 'timer'
             
         elif option == "Apagar Raspberry":
-            show_message("🔴 Apagando...", 2)
+            show_message("Apagando...", 2)
             subprocess.run(["sudo", "poweroff"])
             running = False
             
@@ -512,14 +539,13 @@ def confirm_selection():
             if bluetooth_active:
                 send_single_photo_menu()
             else:
-                show_message("⚠️ Bluetooth OFF", duration=2)
+                show_message("Bluetooth OFF", duration=2)
                 update_display()
                 
         elif option == "Bluetooth":
             toggle_bluetooth()
             
         elif option in ["Foto B/N", "Foto Color"]:
-            # Solo mostrar confirmación, no tomar foto
             show_message(f"Listo: {option}", 1)
     
     update_display()
@@ -529,8 +555,40 @@ def take_current_photo():
     option = menu_options[current_index]
     
     if option in ["Foto B/N", "Foto Color"]:
+        tipo = "B/N" if option == "Foto B/N" else "Color"
+        
+        # Temporizador: Cuenta regresiva si está activado
+        if timer_segundos > 0:
+            for i in range(timer_segundos, 0, -1):
+                image = Image.new("1", (device.width, device.height), "black")
+                draw = ImageDraw.Draw(image)
+                
+                # Número grande centrado
+                numero = str(i)
+                try:
+                    font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 32)
+                except:
+                    font_big = font
+                
+                try:
+                    bbox = draw.textbbox((0, 0), numero, font=font_big)
+                    w = bbox[2] - bbox[0]
+                    h = bbox[3] - bbox[1]
+                except:
+                    w, h = draw.textsize(numero, font=font_big)
+                
+                x = (device.width - w) // 2
+                y = (device.height - h) // 2
+                draw.text((x, y), numero, font=font_big, fill="white")
+                
+                # Texto pequeño arriba
+                draw.text((2, 2), f"Timer: {tipo}", font=font, fill="white")
+                
+                device.display(image)
+                time.sleep(1.0)
+        
+        # Tomar foto
         taken = take_photo(option)
-        # El mensaje ya se muestra en take_photo()
     
     update_display()
 
@@ -554,7 +612,7 @@ while running:
         elif read_button(BTN_TAKE):
             take_current_photo()
         
-        time.sleep(0.05)  # Pequeña pausa para no saturar CPU
+        time.sleep(0.05)
         
     except Exception as e:
         print(f"Error en loop principal: {e}")
