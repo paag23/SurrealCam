@@ -61,7 +61,7 @@ os.makedirs(PHOTO_DIR, exist_ok=True)
 # ---------------------------
 # Configuración Bluetooth
 # ---------------------------
-MAC_ANDROID = "XXXXXXXXXXXXXXXXXX"
+MAC_ANDROID = "XXXXXXXXXXXXXXXXX"
 CANAL_OBEX = "12"
 
 # ---------------------------
@@ -75,7 +75,7 @@ menu_options = [
     "Borrar Fotos",
     "Enviar a Android",
     "Bluetooth",
-    "Apagar Raspberry",
+    "Apagar Camara",
 ]
 
 submenu_filtros_options = [
@@ -85,7 +85,11 @@ submenu_filtros_options = [
     "Rojo Contraste",
     "Sepia",
     "Azul Klein",
-    "Verde"
+    "Verde",
+    "Espiral",
+    "Wes Anderson",
+    "Negativo"
+
 ]
 
 submenu_timer_options = [
@@ -469,6 +473,24 @@ def take_photo(mode):
                     filtros.filtro_matrix_simple(base_file, final_file)
                 except:
                     final_file = base_file
+            elif filtro_seleccionado == "Espiral":
+                final_file = base_file.replace(".jpg", "_espiral.jpg")
+                try:
+                    filtros.filtro_espiral(base_file, final_file, intensidad=6.0)
+                except:
+                    final_file = base_file
+            elif filtro_seleccionado == "Wes Anderson":
+                final_file = base_file.replace(".jpg", "_wes.jpg")
+                try:
+                    filtros.filtro_wes_anderson(base_file, final_file)
+                except:
+                    final_file = base_file
+            elif filtro_seleccionado == "Negativo":
+                final_file = base_file.replace(".jpg", "_negativo.jpg")
+                try:
+                    filtros.filtro_negativo(base_file, final_file)
+                except:
+                      final_file = base_file
 
         try:
             filtros.cleanup_memory()
@@ -527,7 +549,7 @@ def confirm_selection():
             submenu_active = True
             submenu_type = 'timer'
             
-        elif option == "Apagar Raspberry":
+        elif option == "Apagar Camara":
             show_message("Apagando...", 2)
             subprocess.run(["sudo", "poweroff"])
             running = False
